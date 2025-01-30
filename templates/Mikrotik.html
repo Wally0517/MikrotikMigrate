@@ -12,35 +12,28 @@
     </div>
     <div class="container mx-auto py-10">
         <h1 class="text-4xl font-bold text-center bg-gradient-to-r from-blue-600 to-blue-800 text-transparent bg-clip-text mb-10">Mikrotik Configuration Migration</h1>
-        <form id="migrationForm" class="backdrop-blur-md bg-white/30 dark:bg-gray-800/30 text-gray-900 dark:text-gray-200 p-8 rounded-xl shadow-xl max-w-lg mx-auto">
+        <form id="migrationForm" class="bg-white dark:bg-gray-800 dark:text-gray-200 p-8 rounded-xl shadow-lg max-w-lg mx-auto">
             <div class="mb-6">
-                <label for="source_model" class="block font-medium">Source Model:</label>
-                <select name="source_model" id="source_model" required class="w-full px-4 py-3 border rounded-lg bg-white dark:bg-gray-800">
+                <label for="source_model" class="block text-gray-700 dark:text-gray-300 font-medium">Source Model:</label>
+                <select name="source_model" id="source_model" required class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring focus:ring-blue-300 bg-white dark:bg-gray-800 text-black dark:text-white">
                     <option value="1036">CCR1036</option>
                     <option value="2004">CCR2004</option>
                 </select>
             </div>
 
             <div class="mb-6">
-                <label for="target_model" class="block font-medium">Target Model:</label>
-                <select name="target_model" id="target_model" required class="w-full px-4 py-3 border rounded-lg bg-white dark:bg-gray-800">
+                <label for="target_model" class="block text-gray-700 dark:text-gray-300 font-medium">Target Model:</label>
+                <select name="target_model" id="target_model" required class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring focus:ring-blue-300 bg-white dark:bg-gray-800 text-black dark:text-white">
                     <option value="2004">CCR2004</option>
                     <option value="1036">CCR1036</option>
                 </select>
             </div>
 
             <div class="mb-6">
-                <label for="file" class="block font-medium">Configuration File:</label>
-                <div id="dropZone" class="border-2 border-dashed rounded-lg py-6 px-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-700">
-                    <span id="fileName">Drag and drop your file here or click to upload</span>
+                <label for="file" class="block text-gray-700 dark:text-gray-300 font-medium">Configuration File:</label>
+                <div id="dropZone" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg py-6 px-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-700">
+                    <span id="fileName" class="text-gray-600 dark:text-gray-400">Drag and drop your file here or click to upload</span>
                     <input type="file" name="file" id="file" accept=".rsc, .txt" required class="hidden">
-                </div>
-            </div>
-
-            <div id="progressBarContainer" class="hidden mb-6">
-                <label class="block font-medium">Progress:</label>
-                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full">
-                    <div id="progressBar" class="bg-blue-600 text-xs leading-none py-1 text-center text-white rounded-full" style="width: 0%;">0%</div>
                 </div>
             </div>
 
@@ -51,12 +44,12 @@
 
         <div class="mt-6">
             <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">SOURCE MODEL PREVIEW BOX</h2>
-            <div id="sourcePreview" class="p-4 bg-white dark:bg-gray-800 border rounded-lg shadow-sm overflow-auto" style="height: 300px; white-space: pre;"></div>
+            <div id="sourcePreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem; color: white;"></div>
         </div>
 
         <div class="mt-6">
             <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">TARGET MODEL PREVIEW BOX</h2>
-            <div id="targetPreview" class="p-4 bg-white dark:bg-gray-800 border rounded-lg shadow-sm overflow-auto" style="height: 300px; white-space: pre;"></div>
+            <div id="targetPreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem; color: white;"></div>
         </div>
     </div>
 
@@ -67,16 +60,8 @@
         const targetPreview = document.getElementById('targetPreview');
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('file');
-        const progressBarContainer = document.getElementById('progressBarContainer');
-        const progressBar = document.getElementById('progressBar');
         const fileNameDisplay = document.getElementById('fileName');
         const darkModeToggle = document.getElementById('darkModeToggle');
-
-        darkModeToggle.addEventListener('click', () => {
-            document.body.classList.toggle('dark');
-            localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
-            darkModeToggle.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
-        });
 
         dropZone.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', (e) => {
@@ -86,23 +71,27 @@
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             const formData = new FormData(form);
+
             try {
                 statusMessage.textContent = 'Processing migration...';
-                progressBarContainer.classList.remove('hidden');
+                sourcePreview.textContent = '';
+                targetPreview.textContent = '';
 
-                const response = await fetch('/upload', { method: 'POST', body: formData });
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+
                 if (response.ok) {
-                    const text = await response.text();
-                    const [sourceConfig, targetConfig] = text.split('---TARGET---');
-                    sourcePreview.textContent = sourceConfig || 'Source configuration not found';
-                    targetPreview.textContent = targetConfig || 'Target configuration not generated';
+                    const result = await response.json();
+                    sourcePreview.textContent = result.source_config || 'Source configuration not available';
+                    targetPreview.textContent = result.target_config || 'Target configuration not generated';
                 } else {
-                    statusMessage.innerHTML = `<p class='text-red-500 font-bold'>Migration failed.</p>`;
+                    const errorText = await response.text();
+                    statusMessage.innerHTML = `<p class='text-red-500 font-bold'>Migration failed: ${errorText}</p>`;
                 }
             } catch (error) {
-                statusMessage.innerHTML = `<p class='text-red-500'>Error: ${error.message}</p>`;
-            } finally {
-                progressBarContainer.classList.add('hidden');
+                statusMessage.innerHTML = `<p class='text-red-500'>An error occurred: ${error.message}</p>`;
             }
         });
     </script>
