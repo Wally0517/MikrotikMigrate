@@ -21,56 +21,62 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 
 # Define mappings for configuration migration
-def parse_and_migrate(config_content, source_model, target_model, interface_mapping):
+def dynamic_interface_mapping(config_content, source_model, target_model):
     """
     Dynamically replace interfaces based on the target model's specifications.
-    - Removes `etherX` and `sfpX` completely in CCR2004.
-    - Maps all interfaces to `sfp-sfpplusX` dynamically.
-    - Keeps `ether1` only if needed for management.
+    This ensures that:
+    - 'etherX' interfaces (except ether1) are mapped to 'sfp-sfpplusX'.
+    - 'sfpX' interfaces are also mapped accordingly.
+    - The mappings are dynamically generated for any number of interfaces.
     """
-
     if target_model == "2004":
-        interface_replacements = {"ether1": "ether1"}  # Keep ether1 unchanged if used for management
-        sfp_index = 1  # Start mapping from sfp-sfpplus1
-        backhaul_interfaces = {}  # Track original-to-new mappings
+        interface_replacements = {"ether1": "ether1"}  # Keep ether1 unchanged for management
+        sfp_index = 1  # Start indexing from sfp-sfpplus1
+        backhaul_interfaces = {}  # Store original-to-new mappings
         new_config_lines = []
 
-        # Extract and remap interfaces dynamically
+        # Extract interface settings
+        interface_settings = {}
         for line in config_content.splitlines():
-            match = re.search(r'(default-name=)(ether\d+|sfp\d+|sfp-sfpplus\d+)(.*)', line)
+            match = re.search(r'(default-name=)(ether\d+|sfp\d+)(.*)', line)
             if match:
-                prefix, original_iface, additional_config = match.groups()
+                iface_prefix, original_iface, additional_config = match.groups()
 
-                # Assign new interface names dynamically
-                if original_iface.startswith("ether") or original_iface.startswith("sfp"):
+                # Determine new interface mapping
+                if original_iface.startswith("ether") and original_iface != "ether1":
                     new_iface = f"sfp-sfpplus{sfp_index}"
                     sfp_index += 1
+                elif original_iface == "ether1":
+                    new_iface = f"ether1"  # Keep ether1 for management
                 else:
-                    new_iface = original_iface  # Keep existing sfp-sfpplusX interfaces
+                    new_iface = f"sfp-sfpplus{sfp_index}"
+                    sfp_index += 1
 
-                # Track interface mappings
+                # Store original settings
+                interface_settings[new_iface] = additional_config.strip()
                 backhaul_interfaces[original_iface] = new_iface
 
-                # Update configuration line with new interface names
-                new_config_lines.append(f"{prefix}{new_iface}{additional_config}")
+                # Replace interface in line
+                new_config_lines.append(line.replace(original_iface, new_iface))
             else:
                 new_config_lines.append(line)
 
-        # Apply interface mappings to the entire configuration
+        # Apply new mappings to the entire configuration
         config_content = "\n".join(new_config_lines)
 
-        # Update `/ip address` and other interface-based sections dynamically
-        updated_config_lines = []
+        # Update /ip address section dynamically
+        ip_config_lines = []
         for line in config_content.splitlines():
-            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+|sfp-sfpplus\d+)', line)
+            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
             if ip_match:
                 prefix, old_iface = ip_match.groups()
                 new_iface = backhaul_interfaces.get(old_iface, old_iface)
-                updated_config_lines.append(line.replace(old_iface, new_iface))
+                updated_line = line.replace(old_iface, new_iface)
+                ip_config_lines.append(updated_line)
             else:
-                updated_config_lines.append(line)
+                ip_config_lines.append(line)
 
-        config_content = "\n".join(updated_config_lines)
+        config_content = "\n".join(ip_config_lines)
 
     return config_content
 
