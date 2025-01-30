@@ -37,45 +37,82 @@
                 </div>
             </div>
 
+            <div id="progressBarContainer" class="hidden mb-6">
+                <label class="block text-gray-700 dark:text-gray-300 font-medium">Progress:</label>
+                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full">
+                    <div id="progressBar" class="bg-blue-600 text-xs leading-none py-1 text-center text-white rounded-full" style="width: 0%;">0%</div>
+                </div>
+            </div>
+
             <button type="submit" class="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all">Migrate</button>
         </form>
 
-        <div id="statusMessage" class="mt-6 text-center text-lg text-red-500 font-bold"></div>
-
+        <div id="statusMessage" class="mt-6 text-center text-lg"></div>
         <div class="mt-6">
-            <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">SOURCE MODEL PREVIEW BOX</h2>
-            <div id="sourcePreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto text-black dark:text-white" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem;"></div>
-        </div>
-
-        <div class="mt-6">
-            <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">TARGET MODEL PREVIEW BOX</h2>
-            <div id="targetPreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto text-black dark:text-white" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem;"></div>
+            <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">PREVIEW BOX</h2>
+            <div id="preview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto" style="height: 500px; white-space: pre; font-family: monospace; font-size: 1.2rem; color: white;"></div>
         </div>
     </div>
 
     <script>
         const form = document.getElementById('migrationForm');
         const statusMessage = document.getElementById('statusMessage');
-        const sourcePreview = document.getElementById('sourcePreview');
-        const targetPreview = document.getElementById('targetPreview');
+        const preview = document.getElementById('preview');
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('file');
+        const progressBarContainer = document.getElementById('progressBarContainer');
+        const progressBar = document.getElementById('progressBar');
         const fileNameDisplay = document.getElementById('fileName');
         const darkModeToggle = document.getElementById('darkModeToggle');
 
+        // Load theme from localStorage
+        if (localStorage.getItem('theme') === 'dark') {
+            document.body.classList.add('dark');
+            darkModeToggle.textContent = '☀️';
+        }
+
+        // Dark Mode Toggle
+        darkModeToggle.addEventListener('click', () => {
+            document.body.classList.toggle('dark');
+            if (document.body.classList.contains('dark')) {
+                localStorage.setItem('theme', 'dark');
+                darkModeToggle.textContent = '☀️';
+            } else {
+                localStorage.setItem('theme', 'light');
+                darkModeToggle.textContent = '🌙';
+            }
+        });
+
+        // Drag and Drop File Upload
         dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-400', 'bg-blue-50', 'dark:bg-gray-700');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-400', 'bg-blue-50', 'dark:bg-gray-700');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-400', 'bg-blue-50', 'dark:bg-gray-700');
+            fileInput.files = e.dataTransfer.files;
+            fileNameDisplay.textContent = e.dataTransfer.files[0].name;
+        });
+
         fileInput.addEventListener('change', (e) => {
             fileNameDisplay.textContent = e.target.files[0].name;
         });
 
+        // Form Submission
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
+
             const formData = new FormData(form);
 
             try {
                 statusMessage.textContent = 'Processing migration...';
-                sourcePreview.textContent = '';
-                targetPreview.textContent = '';
+                preview.textContent = '';
+                progressBarContainer.classList.remove('hidden');
 
                 const response = await fetch('/upload', {
                     method: 'POST',
@@ -83,15 +120,31 @@
                 });
 
                 if (response.ok) {
-                    const result = await response.json();
-                    sourcePreview.textContent = result.source_config || 'Source configuration not available';
-                    targetPreview.textContent = result.target_config || 'Target configuration not generated';
+                    const blob = await response.blob();
+                    const text = await blob.text();
+
+                    // Display preview
+                    preview.textContent = text;
+
+                    // Provide download link
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = 'migrated_config.rsc';
+                    link.textContent = 'Download Migrated Configuration';
+                    link.className = 'block mt-4 text-blue-600 hover:underline';
+                    statusMessage.innerHTML = '';
+                    statusMessage.appendChild(link);
                 } else {
                     const errorText = await response.text();
-                    statusMessage.textContent = `Migration failed: ${errorText}`;
+                    statusMessage.innerHTML = `<p class='text-red-500 font-bold'>Migration failed: ${errorText}</p>`;
+                    console.error("Migration Error Details:", errorText);
+
                 }
             } catch (error) {
-                statusMessage.textContent = `An error occurred: ${error.message}`;
+                console.error('Error:', error);
+                statusMessage.innerHTML = `<p class='text-red-500'>An error occurred: ${error.message}</p>`;
+            } finally {
+                progressBarContainer.classList.add('hidden');
             }
         });
     </script>
