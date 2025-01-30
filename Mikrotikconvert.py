@@ -107,7 +107,7 @@ def extract_peer_ips(config_content):
 
 @app.route('/')
 def index():
-    return render_template('Mikrotik.html')
+    return render_template('Mikrotik.html')  # Ensure it is inside templates/
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
