@@ -21,19 +21,58 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 
 # Define mappings for configuration migration
-interface_mapping = {
-    "1036": {
-        "ether1": "sfp-sfpplus1",
-        "ether2": "sfp-sfpplus2",
-        "ether3": "sfp-sfpplus3",
-        "ether4": "sfp-sfpplus4",
-    },
-    "2004": {
-        "sfp-sfpplus1": "ether1",
-        "sfp-sfpplus2": "ether2",
-        "sfp-sfpplus3": "ether3",
-    },
-}
+def dynamic_interface_mapping(config_content, source_model, target_model):
+    """
+    Dynamically replace interfaces based on the target model's specifications.
+    - Removes `etherX` and `sfpX` completely in CCR2004.
+    - Maps all interfaces to `sfp-sfpplusX` dynamically.
+    - Keeps `ether1` only if needed for management.
+    """
+
+    if target_model == "2004":
+        interface_replacements = {"ether1": "ether1"}  # Keep ether1 unchanged if used for management
+        sfp_index = 1  # Start mapping from sfp-sfpplus1
+        backhaul_interfaces = {}  # Track original-to-new mappings
+        new_config_lines = []
+
+        # Extract and remap interfaces dynamically
+        for line in config_content.splitlines():
+            match = re.search(r'(default-name=)(ether\d+|sfp\d+|sfp-sfpplus\d+)(.*)', line)
+            if match:
+                prefix, original_iface, additional_config = match.groups()
+
+                # Assign new interface names dynamically
+                if original_iface.startswith("ether") or original_iface.startswith("sfp"):
+                    new_iface = f"sfp-sfpplus{sfp_index}"
+                    sfp_index += 1
+                else:
+                    new_iface = original_iface  # Keep existing sfp-sfpplusX interfaces
+
+                # Track interface mappings
+                backhaul_interfaces[original_iface] = new_iface
+
+                # Update configuration line with new interface names
+                new_config_lines.append(f"{prefix}{new_iface}{additional_config}")
+            else:
+                new_config_lines.append(line)
+
+        # Apply interface mappings to the entire configuration
+        config_content = "\n".join(new_config_lines)
+
+        # Update `/ip address` and other interface-based sections dynamically
+        updated_config_lines = []
+        for line in config_content.splitlines():
+            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+|sfp-sfpplus\d+)', line)
+            if ip_match:
+                prefix, old_iface = ip_match.groups()
+                new_iface = backhaul_interfaces.get(old_iface, old_iface)
+                updated_config_lines.append(line.replace(old_iface, new_iface))
+            else:
+                updated_config_lines.append(line)
+
+        config_content = "\n".join(updated_config_lines)
+
+    return config_content
 
 # OSPF transformation for 2004
 def transform_ospf_2004(router_id, lan_network, loopback_network):
