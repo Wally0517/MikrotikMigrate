@@ -40,16 +40,16 @@
             <button type="submit" class="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all">Migrate</button>
         </form>
 
-        <div id="statusMessage" class="mt-6 text-center text-lg"></div>
+        <div id="statusMessage" class="mt-6 text-center text-lg text-red-500 font-bold"></div>
 
         <div class="mt-6">
             <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">SOURCE MODEL PREVIEW BOX</h2>
-            <div id="sourcePreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem; color: white;"></div>
+            <div id="sourcePreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto text-black dark:text-white" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem;"></div>
         </div>
 
         <div class="mt-6">
             <h2 class="text-lg font-bold text-center text-gray-700 dark:text-gray-300 mb-4">TARGET MODEL PREVIEW BOX</h2>
-            <div id="targetPreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem; color: white;"></div>
+            <div id="targetPreview" class="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-auto text-black dark:text-white" style="height: 300px; white-space: pre; font-family: monospace; font-size: 1.2rem;"></div>
         </div>
     </div>
 
@@ -88,10 +88,10 @@
                     targetPreview.textContent = result.target_config || 'Target configuration not generated';
                 } else {
                     const errorText = await response.text();
-                    statusMessage.innerHTML = `<p class='text-red-500 font-bold'>Migration failed: ${errorText}</p>`;
+                    statusMessage.textContent = `Migration failed: ${errorText}`;
                 }
             } catch (error) {
-                statusMessage.innerHTML = `<p class='text-red-500'>An error occurred: ${error.message}</p>`;
+                statusMessage.textContent = `An error occurred: ${error.message}`;
             }
         });
     </script>
