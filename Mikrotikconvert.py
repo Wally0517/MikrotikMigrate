@@ -24,21 +24,19 @@ app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 def dynamic_interface_mapping(config_content, source_model, target_model):
     """
     Dynamically replace interfaces based on the target model's specifications.
-    This ensures that:
-    - 'etherX' interfaces (except ether1) are mapped to 'sfp-sfpplusX'.
-    - 'sfpX' interfaces are also mapped accordingly.
-    - The mappings are dynamically generated for any number of interfaces.
     """
+    interface_mapping = {}  # Ensure interface_mapping is always defined
+
     if target_model == "2004":
-        interface_replacements = {"ether1": "ether1"}  # Keep ether1 unchanged for management
+        interface_mapping = {"ether1": "ether1"}  # Keep ether1 unchanged for management
         sfp_index = 1  # Start indexing from sfp-sfpplus1
         backhaul_interfaces = {}  # Store original-to-new mappings
         new_config_lines = []
 
-        # Extract interface settings
+        # Extract interface speeds, MTU, and auto-negotiation settings
         interface_settings = {}
         for line in config_content.splitlines():
-            match = re.search(r'(default-name=)(ether\d+|sfp\d+)(.*)', line)
+            match = re.search(r'(default-name=)(ether\d+|sfp\d+|sfp-sfpplus\d+)(.*)', line)
             if match:
                 iface_prefix, original_iface, additional_config = match.groups()
 
@@ -47,10 +45,9 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
                     new_iface = f"sfp-sfpplus{sfp_index}"
                     sfp_index += 1
                 elif original_iface == "ether1":
-                    new_iface = f"ether1"  # Keep ether1 for management
+                    new_iface = "ether1"  # Keep ether1 unchanged
                 else:
-                    new_iface = f"sfp-sfpplus{sfp_index}"
-                    sfp_index += 1
+                    new_iface = original_iface  # Keep existing sfp-sfpplus interfaces
 
                 # Store original settings
                 interface_settings[new_iface] = additional_config.strip()
@@ -67,7 +64,7 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
         # Update /ip address section dynamically
         ip_config_lines = []
         for line in config_content.splitlines():
-            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
+            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+|sfp-sfpplus\d+)', line)
             if ip_match:
                 prefix, old_iface = ip_match.groups()
                 new_iface = backhaul_interfaces.get(old_iface, old_iface)
@@ -110,25 +107,18 @@ def parse_and_migrate(config_content, source_model, target_model):
     loopback_network = extract_loopback_network(config_content)
     peer_ips = extract_peer_ips(config_content)
 
-    # Replace interfaces dynamically
-    for src_iface, tgt_iface in interface_mapping.get(source_model, {}).items():
-        config_content = re.sub(rf'\b{src_iface}\b', tgt_iface, config_content)
+    # Apply dynamic interface mapping before processing OSPF and BGP
+    config_content = dynamic_interface_mapping(config_content, source_model, target_model)
 
-    # Ensure OSPF section is injected properly
+    # Transform OSPF for 2004
     if target_model == "2004":
         ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
-        if not re.search(r'/routing ospf', config_content):
-            config_content += "\n" + ospf_section  # Append OSPF if missing
-        else:
-            config_content = re.sub(r'/routing ospf[\s\S]*?/routing bgp', ospf_section + '\n/routing bgp', config_content, flags=re.MULTILINE)
+        config_content = re.sub(r'/routing ospf[\s\S]*?/routing bgp', ospf_section + '\n/routing bgp', config_content, flags=re.MULTILINE)
 
-    # Ensure BGP section is injected properly
+    # Transform BGP for 2004
     if target_model == "2004":
         bgp_section = transform_bgp_2004(router_id, as_number, peer_ips)
-        if not re.search(r'/routing bgp', config_content):
-            config_content += "\n" + bgp_section  # Append BGP if missing
-        else:
-            config_content = re.sub(r'/routing bgp[\s\S]*?/system', bgp_section + '\n/system', config_content, flags=re.MULTILINE)
+        config_content = re.sub(r'/routing bgp[\s\S]*?/system', bgp_section + '\n/system', config_content, flags=re.MULTILINE)
 
     return config_content
 
