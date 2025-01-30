@@ -73,9 +73,7 @@
     const formData = new FormData(form);
 
     try {
-        // Show processing message
         statusMessage.textContent = 'Processing migration...';
-        statusMessage.classList.add('text-yellow-500', 'font-bold');  // Make it visually distinct
         sourcePreview.textContent = '';
         targetPreview.textContent = '';
 
@@ -84,32 +82,22 @@
             body: formData,
         });
 
-        const contentType = response.headers.get("content-type");
-
-        if (contentType && contentType.includes("application/json")) {
-            const result = await response.json();
-            sourcePreview.textContent = result.source_config || 'Source configuration not available';
-            targetPreview.textContent = result.target_config || 'Target configuration not generated';
-
-            // Create a download link for the migrated file
-            const downloadLink = document.createElement('a');
-            downloadLink.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(result.target_config);
-            downloadLink.download = 'migrated_config.rsc';
-            downloadLink.textContent = 'Download Migrated Configuration';
-            downloadLink.className = 'block mt-4 text-blue-600 font-bold underline cursor-pointer';
-
-            // Replace status message with the download link
-            statusMessage.innerHTML = '';  // Clear existing message
-            statusMessage.appendChild(downloadLink);
-        } else {
-            const text = await response.text();
-            console.error('Unexpected Response:', text);
-            statusMessage.innerHTML = `<p class='text-red-500 font-bold'>Unexpected server response: ${text}</p>`;
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server Error: ${response.status} - ${errorText}`);
         }
 
+        const result = await response.json();
+        
+        console.log("Server Response:", result);
+
+        sourcePreview.textContent = result.source_config || 'Source configuration not available';
+        targetPreview.textContent = result.target_config || 'Target configuration not generated';
+        statusMessage.innerHTML = `<a href="data:text/plain;charset=utf-8,${encodeURIComponent(result.target_config)}" download="migrated_config.rsc" class="text-blue-600 hover:underline">Download Migrated Configuration</a>`;
+
     } catch (error) {
-        console.error('Error:', error);
-        statusMessage.innerHTML = `<p class='text-red-500 font-bold'>An error occurred: ${error.message}</p>`;
+        console.error("Migration Error:", error);
+        statusMessage.innerHTML = `<p class='text-red-500'>An error occurred: ${error.message}</p>`;
     }
 });
 
