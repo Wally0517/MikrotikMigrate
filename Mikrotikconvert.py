@@ -121,40 +121,36 @@ logging.basicConfig(level=logging.DEBUG)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    try:
-        logging.debug("Received file upload request.")
+    if 'file' not in request.files:
+        return {"error": "No file uploaded"}, 400
 
-        if 'file' not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return {"error": "No selected file"}, 400
 
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
+    source_model = request.form.get('source_model')
+    target_model = request.form.get('target_model')
 
-        source_model = request.form.get('source_model')
-        target_model = request.form.get('target_model')
+    if not source_model or not target_model:
+        return {"error": "Source or target model not specified"}, 400
 
-        logging.debug(f"Source model: {source_model}, Target model: {target_model}")
+    # Save uploaded file in /tmp/uploads/
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(file_path)
 
-        if not source_model or not target_model:
-            return jsonify({"error": "Source or target model not specified"}), 400
+    # Read and process the configuration file
+    with open(file_path, 'r') as f:
+        config_content = f.read()
 
-        # Read file content
-        config_content = file.read().decode('utf-8')
-        logging.debug("File content read successfully.")
+    # Migrate the configuration
+    migrated_content = parse_and_migrate(config_content, source_model, target_model)
 
-        # Process migration
-        migrated_content = parse_and_migrate(config_content, source_model, target_model)
-        logging.debug("Configuration migration completed.")
+    # Save the migrated configuration in /tmp/processed/
+    processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
+    with open(processed_file_path, 'w') as f:
+        f.write(migrated_content)
 
-        return jsonify({
-            "source_config": config_content,
-            "target_config": migrated_content
-        })
-    
-    except Exception as e:
-        logging.error(f"Error during migration: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+    return send_file(processed_file_path, as_attachment=True)
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
