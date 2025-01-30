@@ -2,6 +2,7 @@ import os
 import re
 import logging
 from flask import Flask, request, render_template, jsonify, send_file
+from flask import jsonify
 # Initialize Flask app
 app = Flask(__name__, template_folder="templates")
 
@@ -122,35 +123,36 @@ logging.basicConfig(level=logging.DEBUG)
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        return {"error": "No file uploaded"}, 400
+        return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return {"error": "No selected file"}, 400
+        return jsonify({"error": "No selected file"}), 400
 
     source_model = request.form.get('source_model')
     target_model = request.form.get('target_model')
 
     if not source_model or not target_model:
-        return {"error": "Source or target model not specified"}, 400
+        return jsonify({"error": "Source or target model not specified"}), 400
 
-    # Save uploaded file in /tmp/uploads/
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
+    try:
+        # Read and process the configuration file
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
 
-    # Read and process the configuration file
-    with open(file_path, 'r') as f:
-        config_content = f.read()
+        with open(file_path, 'r') as f:
+            config_content = f.read()
 
-    # Migrate the configuration
-    migrated_content = parse_and_migrate(config_content, source_model, target_model)
+        # Migrate the configuration
+        migrated_content = parse_and_migrate(config_content, source_model, target_model)
 
-    # Save the migrated configuration in /tmp/processed/
-    processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
-    with open(processed_file_path, 'w') as f:
-        f.write(migrated_content)
+        return jsonify({
+            "source_config": config_content,
+            "target_config": migrated_content
+        })
 
-    return send_file(processed_file_path, as_attachment=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
