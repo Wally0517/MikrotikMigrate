@@ -7,8 +7,8 @@ app = Flask(__name__, template_folder="templates")
 
 # Set up paths relative to the MikrotikMigrate folder
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'MikrotikMigrate', 'uploads')
-PROCESSED_FOLDER = os.path.join(BASE_DIR, 'MikrotikMigrate', 'processed')
+UPLOAD_FOLDER = "/tmp/uploads"
+PROCESSED_FOLDER = "/tmp/processed"
 TEMPLATES_FOLDER = os.path.join(BASE_DIR, 'MikrotikMigrate', 'templates')
 
 
