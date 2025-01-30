@@ -162,36 +162,45 @@ logging.basicConfig(level=logging.DEBUG)
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return {"error": "No file uploaded"}, 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+        return {"error": "No selected file"}, 400
 
     source_model = request.form.get('source_model')
     target_model = request.form.get('target_model')
 
     if not source_model or not target_model:
-        return jsonify({"error": "Source or target model not specified"}), 400
+        return {"error": "Source or target model not specified"}, 400
 
+    # Save uploaded file
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(file_path)
+
+    # Read and process the configuration file
     try:
-        # Read and process the configuration file
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        file.save(file_path)
-
         with open(file_path, 'r') as f:
             config_content = f.read()
+        
+        # Debug: Ensure file content is being read
+        print(f"Read config file: {file.filename}, Content Size: {len(config_content)}")
 
         # Migrate the configuration
         migrated_content = parse_and_migrate(config_content, source_model, target_model)
 
-        return jsonify({
+        # Debug: Ensure transformation is happening
+        print(f"Migrated content size: {len(migrated_content)}")
+
+        # Return source and target model previews as JSON
+        return {
             "source_config": config_content,
             "target_config": migrated_content
-        })
+        }
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Error processing file: {str(e)}")
+        return {"error": str(e)}, 500
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
