@@ -21,7 +21,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 
 # Define mappings for configuration migration
-def dynamic_interface_mapping(config_content, source_model, target_model):
+def parse_and_migrate(config_content, source_model, target_model, interface_mapping):
     """
     Dynamically replace interfaces based on the target model's specifications.
     - Removes `etherX` and `sfpX` completely in CCR2004.
