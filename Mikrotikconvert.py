@@ -1,7 +1,7 @@
 import os
 import re
-from flask import Flask, request, render_template, send_file
-
+import logging
+from flask import Flask, request, render_template, jsonify, send_file
 # Initialize Flask app
 app = Flask(__name__, template_folder="templates")
 
@@ -64,19 +64,25 @@ def parse_and_migrate(config_content, source_model, target_model):
     loopback_network = extract_loopback_network(config_content)
     peer_ips = extract_peer_ips(config_content)
 
-    # Replace interfaces
+    # Replace interfaces dynamically
     for src_iface, tgt_iface in interface_mapping.get(source_model, {}).items():
         config_content = re.sub(rf'\b{src_iface}\b', tgt_iface, config_content)
 
-    # Transform OSPF for 2004
+    # Ensure OSPF section is injected properly
     if target_model == "2004":
         ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
-        config_content = re.sub(r'/routing ospf[\s\S]*?/routing bgp', ospf_section + '\n/routing bgp', config_content, flags=re.MULTILINE)
+        if not re.search(r'/routing ospf', config_content):
+            config_content += "\n" + ospf_section  # Append OSPF if missing
+        else:
+            config_content = re.sub(r'/routing ospf[\s\S]*?/routing bgp', ospf_section + '\n/routing bgp', config_content, flags=re.MULTILINE)
 
-    # Transform BGP for 2004
+    # Ensure BGP section is injected properly
     if target_model == "2004":
         bgp_section = transform_bgp_2004(router_id, as_number, peer_ips)
-        config_content = re.sub(r'/routing bgp[\s\S]*?/system', bgp_section + '\n/system', config_content, flags=re.MULTILINE)
+        if not re.search(r'/routing bgp', config_content):
+            config_content += "\n" + bgp_section  # Append BGP if missing
+        else:
+            config_content = re.sub(r'/routing bgp[\s\S]*?/system', bgp_section + '\n/system', config_content, flags=re.MULTILINE)
 
     return config_content
 
@@ -110,31 +116,45 @@ def extract_peer_ips(config_content):
 def index():
     return render_template('Mikrotik.html')  # Ensure it is inside templates/
 
+#enabling log
+logging.basicConfig(level=logging.DEBUG)
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return "No file uploaded", 400
+    try:
+        logging.debug("Received file upload request.")
 
-    file = request.files['file']
-    if file.filename == '':
-        return "No selected file", 400
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
 
-    source_model = request.form.get('source_model')
-    target_model = request.form.get('target_model')
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
 
-    if not source_model or not target_model:
-        return "Source or target model not specified", 400
+        source_model = request.form.get('source_model')
+        target_model = request.form.get('target_model')
 
-    # Save uploaded file
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
+        logging.debug(f"Source model: {source_model}, Target model: {target_model}")
 
-    # Read and process the configuration file
-    with open(file_path, 'r') as f:
-        config_content = f.read()
+        if not source_model or not target_model:
+            return jsonify({"error": "Source or target model not specified"}), 400
 
-    # Migrate the configuration
-    migrated_content = parse_and_migrate(config_content, source_model, target_model)
+        # Read file content
+        config_content = file.read().decode('utf-8')
+        logging.debug("File content read successfully.")
+
+        # Process migration
+        migrated_content = parse_and_migrate(config_content, source_model, target_model)
+        logging.debug("Configuration migration completed.")
+
+        return jsonify({
+            "source_config": config_content,
+            "target_config": migrated_content
+        })
+    
+    except Exception as e:
+        logging.error(f"Error during migration: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
