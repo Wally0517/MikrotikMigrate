@@ -24,7 +24,7 @@ app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 def dynamic_interface_mapping(config_content, source_model, target_model):
     """
     Fully migrate etherX & sfpX to sfp-sfpplusX dynamically.
-    Ensures all configurations (comments, IPs, MTU) remain intact.
+    Also updates the /ip address assignments to reflect new mappings.
     """
     if target_model == "2004":
         sfp_index = 1  # Start indexing from sfp-sfpplus1
@@ -51,7 +51,7 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
 
         updated_config = "\n".join(new_config_lines)
 
-        # Second Pass: Replace interfaces in other sections (IP, OSPF, BGP, etc.)
+        # Second Pass: Replace interfaces in /ip address section
         final_config_lines = []
         for line in updated_config.splitlines():
             ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
