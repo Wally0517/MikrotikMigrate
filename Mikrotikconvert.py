@@ -23,59 +23,49 @@ app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 # Define mappings for configuration migration
 def dynamic_interface_mapping(config_content, source_model, target_model):
     """
-    Dynamically replace interfaces based on the target model's specifications.
+    Fully migrate etherX & sfpX to sfp-sfpplusX dynamically.
+    Ensures all configurations (comments, IPs, MTU) remain intact.
     """
-    interface_mapping = {}  # Ensure interface_mapping is always defined
-
     if target_model == "2004":
-        interface_mapping = {"ether1": "ether1"}  # Keep ether1 unchanged for management
         sfp_index = 1  # Start indexing from sfp-sfpplus1
-        backhaul_interfaces = {}  # Store original-to-new mappings
+        interface_mappings = {}  # Store mappings of old -> new interfaces
         new_config_lines = []
 
-        # Extract interface speeds, MTU, and auto-negotiation settings
-        interface_settings = {}
+        # First Pass: Detect and replace interfaces
         for line in config_content.splitlines():
-            match = re.search(r'(default-name=)(ether\d+|sfp\d+|sfp-sfpplus\d+)(.*)', line)
+            match = re.search(r'(default-name=)(ether\d+|sfp\d+)(.*)', line)
             if match:
-                iface_prefix, original_iface, additional_config = match.groups()
+                prefix, old_iface, additional_config = match.groups()
 
-                # Determine new interface mapping
-                if original_iface.startswith("ether") and original_iface != "ether1":
-                    new_iface = f"sfp-sfpplus{sfp_index}"
-                    sfp_index += 1
-                elif original_iface == "ether1":
-                    new_iface = "ether1"  # Keep ether1 unchanged
-                else:
-                    new_iface = original_iface  # Keep existing sfp-sfpplus interfaces
+                # Assign new interface dynamically
+                new_iface = f"sfp-sfpplus{sfp_index}"
+                sfp_index += 1
 
-                # Store original settings
-                interface_settings[new_iface] = additional_config.strip()
-                backhaul_interfaces[original_iface] = new_iface
+                # Store mapping for later use
+                interface_mappings[old_iface] = new_iface
 
-                # Replace interface in line
-                new_config_lines.append(line.replace(original_iface, new_iface))
+                # Update the line with the new interface
+                new_config_lines.append(line.replace(old_iface, new_iface))
             else:
                 new_config_lines.append(line)
 
-        # Apply new mappings to the entire configuration
-        config_content = "\n".join(new_config_lines)
+        updated_config = "\n".join(new_config_lines)
 
-        # Update /ip address section dynamically
-        ip_config_lines = []
-        for line in config_content.splitlines():
-            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+|sfp-sfpplus\d+)', line)
+        # Second Pass: Replace interfaces in other sections (IP, OSPF, BGP, etc.)
+        final_config_lines = []
+        for line in updated_config.splitlines():
+            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
             if ip_match:
                 prefix, old_iface = ip_match.groups()
-                new_iface = backhaul_interfaces.get(old_iface, old_iface)
+                new_iface = interface_mappings.get(old_iface, old_iface)  # Replace with mapped iface
                 updated_line = line.replace(old_iface, new_iface)
-                ip_config_lines.append(updated_line)
+                final_config_lines.append(updated_line)
             else:
-                ip_config_lines.append(line)
+                final_config_lines.append(line)
 
-        config_content = "\n".join(ip_config_lines)
+        return "\n".join(final_config_lines)
 
-    return config_content
+    return config_content  # If not migrating to 2004, return as-is
 
 # OSPF transformation for 2004
 def transform_ospf_2004(router_id, lan_network, loopback_network):
