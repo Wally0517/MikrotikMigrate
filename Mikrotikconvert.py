@@ -53,19 +53,29 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
 
         # Second Pass: Replace interfaces in /ip address section
         final_config_lines = []
+        in_ip_section = False  # Track when we're inside /ip address section
+
         for line in updated_config.splitlines():
-            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
-            if ip_match:
-                prefix, old_iface = ip_match.groups()
-                new_iface = interface_mappings.get(old_iface, old_iface)  # Replace with mapped iface
-                updated_line = line.replace(old_iface, new_iface)
-                final_config_lines.append(updated_line)
+            if line.strip().startswith("/ip address"):
+                in_ip_section = True  # Start of /ip address section
+                final_config_lines.append(line)
+                continue
+
+            if in_ip_section and re.match(r'add address=.*interface=', line):
+                ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
+                if ip_match:
+                    prefix, old_iface = ip_match.groups()
+                    new_iface = interface_mappings.get(old_iface, old_iface)  # Replace with mapped iface
+                    updated_line = line.replace(old_iface, new_iface)
+                    final_config_lines.append(updated_line)
+                else:
+                    final_config_lines.append(line)
             else:
                 final_config_lines.append(line)
 
         return "\n".join(final_config_lines)
 
-    return config_content  # If not migrating to 2004, return as-is
+    return config_content  # If not migrating to 2004
 
 # OSPF transformation for 2004
 def transform_ospf_2004(router_id, lan_network, loopback_network):
