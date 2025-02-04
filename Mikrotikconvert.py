@@ -124,7 +124,7 @@ add name=Peer2 remote.address={peer_ips[1]} remote.as={as_number} connect=yes li
 """
     return bgp_config
 
-# 🎯 **FULL CONFIGURATION MIGRATION - NOW FULLY ROS7 COMPATIBLE**
+# 🔥 **FULL CONFIGURATION MIGRATION - NOW FULLY ROS7 COMPATIBLE**
 def parse_and_migrate(config_content, source_model, target_model):
     """
     Parses and migrates the configuration from source model to target model (CCR2004).
@@ -132,6 +132,7 @@ def parse_and_migrate(config_content, source_model, target_model):
     Prevents duplicate entries in key sections.
     Fully compatible with ROS7.
     """
+
     router_id = extract_router_id(config_content)
     as_number = extract_as_number(config_content)
     lan_network = extract_lan_network(config_content)
@@ -141,16 +142,18 @@ def parse_and_migrate(config_content, source_model, target_model):
     # Step 1️⃣: Replace interfaces dynamically
     config_content, interface_mappings = dynamic_interface_mapping(config_content, source_model, target_model)
 
-    # Step 2️⃣: Migrate IP address section
+    # Step 2️⃣: Migrate IP address section (ensures CCR2004 has only sfp-sfpplusX)
     config_content = migrate_ip_addresses(config_content, interface_mappings)
 
-    # Step 3️⃣: Extract and retain firewall rules (now ensuring uniqueness)
-    firewall_rules = extract_firewall_rules(config_content)
-    firewall_rules = remove_duplicates(firewall_rules)  # ✅ Remove duplicate firewall rules
+    # Step 3️⃣: Extract & retain firewall rules (only for CCR2004)
+    firewall_rules = None
+    if target_model == "2004":
+        firewall_rules = extract_firewall_rules(config_content)
+        firewall_rules = remove_duplicates(firewall_rules)  # ✅ Remove duplicate firewall rules
 
     # Step 4️⃣: Apply OSPF transformation (ROS7 Compatible)
     if target_model == "2004":
-        ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
+        ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network, config_content)
         ospf_section = update_ospf_authentication(ospf_section)  # ✅ Convert `authentication=` to `auth=`
         ospf_section = remove_duplicates(ospf_section)  # ✅ Remove duplicate OSPF entries
         config_content += f"\n\n{ospf_section}"
@@ -167,7 +170,7 @@ def parse_and_migrate(config_content, source_model, target_model):
         route_section = remove_duplicates(route_section)  # ✅ Prevent duplicate route entries
         config_content += f"\n\n{route_section}"
 
-    # Step 7️⃣: Ensure firewall rules are included (without duplicates)
+    # Step 7️⃣: Ensure firewall rules are included (only if they exist)
     if firewall_rules:
         config_content += f"\n\n{firewall_rules}"
 
