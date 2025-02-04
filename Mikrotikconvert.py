@@ -20,18 +20,17 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 
-# Define mappings for configuration migration
+# 🎯 **DYNAMIC INTERFACE MAPPING**
 def dynamic_interface_mapping(config_content, source_model, target_model):
     """
-    Fully migrate etherX & sfpX to sfp-sfpplusX dynamically.
-    Also updates the /ip address assignments to reflect new mappings.
+    Dynamically replaces all `etherX` and `sfpX` interfaces with `sfp-sfpplusX` in the target model.
+    Returns the updated configuration and the mapping dictionary.
     """
     if target_model == "2004":
         sfp_index = 1  # Start indexing from sfp-sfpplus1
         interface_mappings = {}  # Store mappings of old -> new interfaces
         new_config_lines = []
 
-        # First Pass: Detect and replace interfaces
         for line in config_content.splitlines():
             match = re.search(r'(default-name=)(ether\d+|sfp\d+)(.*)', line)
             if match:
@@ -43,6 +42,7 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
 
                 # Store mapping for later use
                 interface_mappings[old_iface] = new_iface
+                logging.debug(f"Mapped {old_iface} ➝ {new_iface}")
 
                 # Update the line with the new interface
                 new_config_lines.append(line.replace(old_iface, new_iface))
@@ -50,18 +50,19 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
                 new_config_lines.append(line)
 
         updated_config = "\n".join(new_config_lines)
-
         return updated_config, interface_mappings  # ✅ Return both values
 
     return config_content, {}  # ✅ Return empty dictionary if no migration needed
 
+
+# 🎯 **MIGRATE /IP ADDRESSES**
 def migrate_ip_addresses(config_content, interface_mappings):
     """
     Updates /ip address section by replacing old interfaces with newly mapped ones.
     Ensures all IP assignments correctly reflect new interfaces.
     """
     migrated_lines = []
-    in_ip_section = False  # Track if we are in the /ip address section
+    in_ip_section = False
 
     for line in config_content.splitlines():
         if line.strip().startswith("/ip address"):
@@ -70,11 +71,11 @@ def migrate_ip_addresses(config_content, interface_mappings):
             continue
 
         if in_ip_section and "interface=" in line:
-            # Find old interface names and replace them with mapped ones
             ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
             if ip_match:
                 prefix, old_iface = ip_match.groups()
                 new_iface = interface_mappings.get(old_iface, old_iface)  # Replace if mapped
+                logging.debug(f"IP address migrated: {old_iface} ➝ {new_iface}")
                 migrated_lines.append(line.replace(old_iface, new_iface))
             else:
                 migrated_lines.append(line)
@@ -82,7 +83,7 @@ def migrate_ip_addresses(config_content, interface_mappings):
             migrated_lines.append(line)
 
     return "\n".join(migrated_lines)
-
+    
 # OSPF transformation for 2004
 def transform_ospf_2004(router_id, lan_network, loopback_network):
     """
@@ -112,31 +113,35 @@ add name=Peer2 remote.address={peer_ips[1]} remote.as={as_number} connect=yes li
 """
     return bgp_config
 
-# Parse and migrate configuration
+# 🎯 **FULL CONFIGURATION MIGRATION**
 def parse_and_migrate(config_content, source_model, target_model):
+    """
+    Parses and migrates the configuration from source model to target model.
+    Ensures full transformation including interfaces, OSPF, BGP, and IP addresses.
+    """
     router_id = extract_router_id(config_content)
     as_number = extract_as_number(config_content)
     lan_network = extract_lan_network(config_content)
     loopback_network = extract_loopback_network(config_content)
     peer_ips = extract_peer_ips(config_content)
 
-    # Apply dynamic interface mapping before processing OSPF and BGP
-    config_content, interface_mappings = dynamic_interface_mapping(config_content, source_model, target_model)  # ✅ Now correctly returns both
+    # Step 1️⃣: Replace interfaces dynamically
+    config_content, interface_mappings = dynamic_interface_mapping(config_content, source_model, target_model)
 
-    # Ensure /ip addresses are also updated based on new interface mappings
+    # Step 2️⃣: Migrate IP address section
     config_content = migrate_ip_addresses(config_content, interface_mappings)
 
-    # Transform OSPF for 2004
+    # Step 3️⃣: Apply OSPF transformation
     if target_model == "2004":
         ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
         config_content = re.sub(r'/routing ospf[\s\S]*?/routing bgp', ospf_section + '\n/routing bgp', config_content, flags=re.MULTILINE)
 
-    # Transform BGP for 2004
+    # Step 4️⃣: Apply BGP transformation
     if target_model == "2004":
         bgp_section = transform_bgp_2004(router_id, as_number, peer_ips)
         config_content = re.sub(r'/routing bgp[\s\S]*?/system', bgp_section + '\n/system', config_content, flags=re.MULTILINE)
 
-    return config_content  # ✅ Now fully processed
+    return config_content  # ✅ Fully processed
 
 # Helper functions
 def extract_router_id(config_content):
@@ -201,45 +206,40 @@ logging.basicConfig(level=logging.DEBUG)
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        return {"error": "No file uploaded"}, 400
+        return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return {"error": "No selected file"}, 400
+        return jsonify({"error": "No selected file"}), 400
 
     source_model = request.form.get('source_model')
     target_model = request.form.get('target_model')
 
     if not source_model or not target_model:
-        return {"error": "Source or target model not specified"}, 400
+        return jsonify({"error": "Source or target model not specified"}), 400
 
-    # Save uploaded file
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(file_path)
 
-    # Read and process the configuration file
     try:
         with open(file_path, 'r') as f:
             config_content = f.read()
-        
-        # Debug: Ensure file content is being read
-        print(f"Read config file: {file.filename}, Content Size: {len(config_content)}")
 
-        # Migrate the configuration
+        logging.debug(f"Processing file: {file.filename}, Size: {len(config_content)} bytes")
+
+        # Perform migration
         migrated_content = parse_and_migrate(config_content, source_model, target_model)
 
-        # Debug: Ensure transformation is happening
-        print(f"Migrated content size: {len(migrated_content)}")
+        logging.debug(f"Migration complete. New config size: {len(migrated_content)} bytes")
 
-        # Return source and target model previews as JSON
-        return {
+        return jsonify({
             "source_config": config_content,
             "target_config": migrated_content
-        }
+        })
 
     except Exception as e:
-        print(f"Error processing file: {str(e)}")
-        return {"error": str(e)}, 500
+        logging.error(f"Error during migration: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
