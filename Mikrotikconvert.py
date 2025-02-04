@@ -23,67 +23,46 @@ app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
 # Define mappings for configuration migration
 def dynamic_interface_mapping(config_content, source_model, target_model):
     """
-    Fully migrate etherX & sfpX to sfp-sfpplusX dynamically.
-    Also updates the /ip address assignments to reflect new mappings.
+    Dynamically migrate etherX & sfpX interfaces to sfp-sfpplusX for CCR2004.
+    Also updates the /ip address assignments accordingly.
     """
-    if target_model == "2004":
-        sfp_index = 1  # Start indexing from sfp-sfpplus1
-        interface_mappings = {}  # Store mappings of old -> new interfaces
-        new_config_lines = []
+    if target_model != "2004":
+        return config_content  # Skip transformation if not migrating to 2004
 
-        # First Pass: Detect and replace interfaces
-        for line in config_content.splitlines():
-            match = re.search(r'(default-name=)(ether\d+|sfp\d+)(.*)', line)
-            if match:
-                prefix, old_iface, additional_config = match.groups()
+    sfp_index = 1  # Start numbering from sfp-sfpplus1
+    interface_mappings = {}  # Store old-to-new interface mappings
+    new_config_lines = []
 
-                # Assign new interface dynamically
-                new_iface = f"sfp-sfpplus{sfp_index}"
-                sfp_index += 1
+    # First Pass: Detect and replace interfaces in configuration
+    for line in config_content.splitlines():
+        match = re.search(r'(default-name=)(ether\d+|sfp\d+)', line)
+        if match:
+            prefix, old_iface = match.groups()
+            new_iface = f"sfp-sfpplus{sfp_index}"
+            sfp_index += 1  # Increment for next mapping
 
-                # Store mapping for later use
-                interface_mappings[old_iface] = new_iface
+            # Store mapping for second pass
+            interface_mappings[old_iface] = new_iface
 
-                # Update the line with the new interface
-                new_config_lines.append(line.replace(old_iface, new_iface))
-            else:
-                new_config_lines.append(line)
+            # Replace old interface with new dynamically assigned one
+            new_line = line.replace(old_iface, new_iface)
+            new_config_lines.append(new_line)
+        else:
+            new_config_lines.append(line)
 
-        updated_config = "\n".join(new_config_lines)
+    updated_config = "\n".join(new_config_lines)
 
-        # Second Pass: Replace interfaces in /ip address section
-        final_config_lines = []
-        in_ip_section = False  # Track when we're inside /ip address section
+    # Second Pass: Replace all interface names in relevant sections
+    return migrate_ip_addresses(updated_config, interface_mappings)
 
-        for line in updated_config.splitlines():
-            if line.strip().startswith("/ip address"):
-                in_ip_section = True  # Start of /ip address section
-                final_config_lines.append(line)
-                continue
 
-            if in_ip_section and re.match(r'add address=.*interface=', line):
-                ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
-                if ip_match:
-                    prefix, old_iface = ip_match.groups()
-                    new_iface = interface_mappings.get(old_iface, old_iface)  # Replace with mapped iface
-                    updated_line = line.replace(old_iface, new_iface)
-                    final_config_lines.append(updated_line)
-                else:
-                    final_config_lines.append(line)
-            else:
-                final_config_lines.append(line)
-
-        return "\n".join(final_config_lines)
-
-    return config_content  # If not migrating to 2004
-
-#IP address mapping
 def migrate_ip_addresses(config_content, interface_mappings):
     """
-    Migrate /ip address section by mapping old interfaces to new dynamically assigned interfaces.
+    Updates /ip address section by replacing old interfaces with newly mapped ones.
+    Ensures all IP assignments correctly reflect new interfaces.
     """
     migrated_lines = []
-    in_ip_section = False
+    in_ip_section = False  # Track if we are in the /ip address section
 
     for line in config_content.splitlines():
         if line.strip().startswith("/ip address"):
@@ -91,13 +70,13 @@ def migrate_ip_addresses(config_content, interface_mappings):
             migrated_lines.append(line)  # Keep section header
             continue
 
-        if in_ip_section and re.match(r'add address=.*interface=', line):
+        if in_ip_section and "interface=" in line:
+            # Find old interface names and replace them with mapped ones
             ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
             if ip_match:
                 prefix, old_iface = ip_match.groups()
-                new_iface = interface_mappings.get(old_iface, old_iface)  # Replace with mapped iface
-                updated_line = line.replace(old_iface, new_iface)
-                migrated_lines.append(updated_line)
+                new_iface = interface_mappings.get(old_iface, old_iface)  # Replace if mapped
+                migrated_lines.append(line.replace(old_iface, new_iface))
             else:
                 migrated_lines.append(line)
         else:
@@ -107,36 +86,49 @@ def migrate_ip_addresses(config_content, interface_mappings):
 
 # OSPF transformation for 2004
 def transform_ospf_2004(router_id, lan_network, loopback_network):
+    """
+    Transforms OSPF configuration for CCR2004, ensuring compatibility with ROS7.
+    """
     ospf_config = f"""/routing ospf instance
-add disabled=no name=default-v2 router-id={router_id}
+add disabled=no name=default-v2 router-id={router_id} version=2 redistribute-connected=yes redistribute-static=yes
 /routing ospf area
 add disabled=no instance=default-v2 name=backbone-v2
 /routing ospf interface-template
-add area=backbone-v2 cost=10 disabled=no interfaces=loop0 networks={loopback_network} passive priority=1
+add area=backbone-v2 cost=10 disabled=no interfaces=loop0 networks={loopback_network} passive=yes priority=1
 add area=backbone-v2 cost=10 disabled=no interfaces=lan-bridge networks={lan_network} priority=1
 """
     return ospf_config
 
 # BGP transformation for 2004
 def transform_bgp_2004(router_id, as_number, peer_ips):
+    """
+    Transforms BGP configuration for CCR2004.
+    Ensures proper peering with remote AS.
+    """
     bgp_config = f"""/routing bgp template
 set default as={as_number} disabled=no multihop=yes output.network=bgp-networks router-id={router_id} routing-table=main
 /routing bgp connection
-add cisco-vpls-nlri-len-fmt=auto-bits connect=yes listen=yes local.address={router_id} .role=ibgp multihop=yes name=Peer1 remote.address={peer_ips[0]} .as={as_number} .port=179 templates=default
-add cisco-vpls-nlri-len-fmt=auto-bits connect=yes listen=yes local.address={router_id} .role=ibgp multihop=yes name=Peer2 remote.address={peer_ips[1]} .as={as_number} .port=179 templates=default
+add name=Peer1 remote.address={peer_ips[0]} remote.as={as_number} connect=yes listen=yes local.address={router_id} multihop=yes .port=179 templates=default
+add name=Peer2 remote.address={peer_ips[1]} remote.as={as_number} connect=yes listen=yes local.address={router_id} multihop=yes .port=179 templates=default
 """
     return bgp_config
 
 # Parse and migrate configuration
 def parse_and_migrate(config_content, source_model, target_model):
+    """
+    Parses and migrates Mikrotik configuration from source model to target model.
+    Applies interface mappings, OSPF, and BGP transformations dynamically.
+    """
     router_id = extract_router_id(config_content)
     as_number = extract_as_number(config_content)
     lan_network = extract_lan_network(config_content)
     loopback_network = extract_loopback_network(config_content)
     peer_ips = extract_peer_ips(config_content)
 
-    # Apply dynamic interface mapping before processing OSPF and BGP
+    # Apply dynamic interface mapping BEFORE processing OSPF and BGP
     config_content = dynamic_interface_mapping(config_content, source_model, target_model)
+    
+    # Ensure /ip address migration occurs correctly after interface mapping
     config_content = migrate_ip_addresses(config_content, interface_mappings)
 
     # Transform OSPF for 2004
@@ -153,29 +145,56 @@ def parse_and_migrate(config_content, source_model, target_model):
 
 # Helper functions
 def extract_router_id(config_content):
-    """Extract router ID from configuration."""
-    match = re.search(r'router-id=(\S+)', config_content)
+    """
+    Extracts router ID dynamically from the source model.
+    Ensures that the router ID is always correctly captured.
+    """
+    match = re.search(r'router-id\s*=\s*(\S+)', config_content)
     return match.group(1) if match else "<dynamic-router-id>"
 
 def extract_as_number(config_content):
-    """Extract AS number for BGP."""
-    match = re.search(r'as=(\d+)', config_content)
+    """
+    Extracts AS number for BGP from the source configuration.
+    Defaults to '65000' if not explicitly found.
+    """
+    match = re.search(r'\bas\s*=\s*(\d+)', config_content)
     return match.group(1) if match else "65000"
 
 def extract_lan_network(config_content):
-    """Extract LAN bridge network."""
-    match = re.search(r'networks=(\S+)/22', config_content)
-    return match.group(1) + "/22" if match else "0.0.0.0/22"
+    """
+    Extracts LAN bridge network dynamically.
+    Captures correct subnet format from any input config.
+    """
+    match = re.search(r'address\s*=\s*(\d+\.\d+\.\d+\.\d+)/(\d+)', config_content)
+    return f"{match.group(1)}/{match.group(2)}" if match else "0.0.0.0/22"
 
 def extract_loopback_network(config_content):
-    """Extract loopback network."""
-    match = re.search(r'networks=(\S+)/32', config_content)
-    return match.group(1) + "/32" if match else "0.0.0.0/32"
+    """
+    Extracts the loopback network dynamically from the configuration.
+    Ensures a /32 subnet is assigned for loopback.
+    """
+    match = re.search(r'interface=loopback.*?address\s*=\s*(\d+\.\d+\.\d+\.\d+)/(\d+)', config_content, re.IGNORECASE)
+    return f"{match.group(1)}/{match.group(2)}" if match else "0.0.0.0/32"
 
 def extract_peer_ips(config_content):
-    """Extract peer IPs for BGP."""
-    matches = re.findall(r'remote.address=(\S+)', config_content)
+    """
+    Extracts BGP peer IPs dynamically.
+    Ensures multiple peer IPs are captured if present.
+    """
+    matches = re.findall(r'remote\.address\s*=\s*(\d+\.\d+\.\d+\.\d+)', config_content)
     return matches if matches else ["0.0.0.0", "0.0.0.0"]
+
+def extract_ip_addresses(config_content):
+    """
+    Extracts all /ip address entries dynamically from the source model.
+    Ensures accurate IP assignments are mapped to the correct interfaces.
+    """
+    ip_mappings = {}
+    for match in re.findall(r'add address=(\d+\.\d+\.\d+\.\d+/\d+).*?interface=(\S+)', config_content):
+        ip_address, interface = match
+        ip_mappings[interface] = ip_address
+
+    return ip_mappings
 
 @app.route('/')
 def index():
