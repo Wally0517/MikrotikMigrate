@@ -77,6 +77,7 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
 
     return config_content  # If not migrating to 2004
 
+#IP address mapping
 def migrate_ip_addresses(config_content, interface_mappings):
     """
     Migrate /ip address section by mapping old interfaces to new dynamically assigned interfaces.
