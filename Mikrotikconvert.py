@@ -113,11 +113,11 @@ add name=Peer2 remote.address={peer_ips[1]} remote.as={as_number} connect=yes li
 """
     return bgp_config
 
-# 🎯 **FULL CONFIGURATION MIGRATION**
+# 🎯 **FULL CONFIGURATION MIGRATION WITH FIXES**
 def parse_and_migrate(config_content, source_model, target_model):
     """
     Parses and migrates the configuration from source model to target model.
-    Ensures full transformation including interfaces, OSPF, BGP, and IP addresses.
+    Ensures full transformation including interfaces, OSPF, BGP, IP addresses, and firewall rules.
     """
     router_id = extract_router_id(config_content)
     as_number = extract_as_number(config_content)
@@ -131,17 +131,24 @@ def parse_and_migrate(config_content, source_model, target_model):
     # Step 2️⃣: Migrate IP address section
     config_content = migrate_ip_addresses(config_content, interface_mappings)
 
-    # Step 3️⃣: Apply OSPF transformation
+    # Step 3️⃣: Extract and retain firewall rules
+    firewall_rules = extract_firewall_rules(config_content)
+
+    # Step 4️⃣: Apply OSPF transformation
     if target_model == "2004":
         ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
-        config_content = re.sub(r'/routing ospf[\s\S]*?/routing bgp', ospf_section + '\n/routing bgp', config_content, flags=re.MULTILINE)
+        config_content += f"\n\n{ospf_section}"  # ✅ Append instead of replacing
 
-    # Step 4️⃣: Apply BGP transformation
+    # Step 5️⃣: Apply BGP transformation
     if target_model == "2004":
         bgp_section = transform_bgp_2004(router_id, as_number, peer_ips)
-        config_content = re.sub(r'/routing bgp[\s\S]*?/system', bgp_section + '\n/system', config_content, flags=re.MULTILINE)
+        config_content += f"\n\n{bgp_section}"  # ✅ Append instead of replacing
 
-    return config_content  # ✅ Fully processed
+    # Step 6️⃣: Ensure firewall rules are included
+    if firewall_rules:
+        config_content += f"\n\n{firewall_rules}"
+
+    return config_content  # ✅ Fully processed with IPs, OSPF, BGP, and firewall settings.
 
 # Helper functions
 def extract_router_id(config_content):
@@ -176,6 +183,25 @@ def extract_loopback_network(config_content):
     match = re.search(r'interface=loopback.*?address\s*=\s*(\d+\.\d+\.\d+\.\d+)/(\d+)', config_content, re.IGNORECASE)
     return f"{match.group(1)}/{match.group(2)}" if match else "0.0.0.0/32"
 
+def extract_firewall_rules(config_content):
+    """
+    Extracts firewall rules from the source configuration.
+    Ensures that all firewall rules are migrated properly.
+    """
+    firewall_section = []
+    in_firewall_section = False
+
+    for line in config_content.splitlines():
+        if line.strip().startswith("/ip firewall"):
+            in_firewall_section = True
+            firewall_section.append(line)
+        elif in_firewall_section:
+            if line.strip() == "":
+                break  # Stop at the end of the firewall section
+            firewall_section.append(line)
+
+    return "\n".join(firewall_section) if firewall_section else ""
+
 def extract_peer_ips(config_content):
     """
     Extracts BGP peer IPs dynamically.
@@ -206,40 +232,46 @@ logging.basicConfig(level=logging.DEBUG)
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return {"error": "No file uploaded"}, 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+        return {"error": "No selected file"}, 400
 
     source_model = request.form.get('source_model')
     target_model = request.form.get('target_model')
 
     if not source_model or not target_model:
-        return jsonify({"error": "Source or target model not specified"}), 400
+        return {"error": "Source or target model not specified"}, 400
 
+    # Save uploaded file
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(file_path)
 
+    # Read and process the configuration file
     try:
         with open(file_path, 'r') as f:
             config_content = f.read()
 
-        logging.debug(f"Processing file: {file.filename}, Size: {len(config_content)} bytes")
+        # Debug: Ensure file content is being read
+        print(f"Read config file: {file.filename}, Content Size: {len(config_content)}")
 
-        # Perform migration
+        # Migrate the configuration
         migrated_content = parse_and_migrate(config_content, source_model, target_model)
 
-        logging.debug(f"Migration complete. New config size: {len(migrated_content)} bytes")
+        # Debug: Ensure transformation is happening
+        print(f"Migrated content size: {len(migrated_content)}")
+        print("FINAL MIGRATION OUTPUT:\n", migrated_content)  # ✅ Debugging
 
+        # Return source and target model previews as JSON
         return jsonify({
             "source_config": config_content,
             "target_config": migrated_content
         })
 
     except Exception as e:
-        logging.error(f"Error during migration: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        print(f"Error processing file: {str(e)}")
+        return {"error": str(e)}, 500
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
