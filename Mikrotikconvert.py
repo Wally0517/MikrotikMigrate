@@ -58,11 +58,11 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
 # 🎯 **MIGRATE /IP ADDRESSES**
 def migrate_ip_addresses(config_content, interface_mappings):
     """
-    Updates /ip address section by replacing old interfaces with newly mapped ones.
+    Updates the /ip address section by replacing old interfaces with newly mapped ones.
     Ensures all IP assignments correctly reflect new interfaces.
     """
     migrated_lines = []
-    in_ip_section = False
+    in_ip_section = False  # Track if we are in the /ip address section
 
     for line in config_content.splitlines():
         if line.strip().startswith("/ip address"):
@@ -71,12 +71,13 @@ def migrate_ip_addresses(config_content, interface_mappings):
             continue
 
         if in_ip_section and "interface=" in line:
+            # Find old interface names and replace them with mapped ones
             ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
             if ip_match:
                 prefix, old_iface = ip_match.groups()
                 new_iface = interface_mappings.get(old_iface, old_iface)  # Replace if mapped
-                logging.debug(f"IP address migrated: {old_iface} ➝ {new_iface}")
-                migrated_lines.append(line.replace(old_iface, new_iface))
+                updated_line = line.replace(old_iface, new_iface)
+                migrated_lines.append(updated_line)
             else:
                 migrated_lines.append(line)
         else:
@@ -85,10 +86,17 @@ def migrate_ip_addresses(config_content, interface_mappings):
     return "\n".join(migrated_lines)
     
 # OSPF transformation for 2004
-def transform_ospf_2004(router_id, lan_network, loopback_network):
+def transform_ospf_2004(router_id, lan_network, loopback_network, config_content):
     """
     Transforms OSPF configuration for CCR2004, ensuring compatibility with ROS7.
+    Fixes authentication changes:
+    - 'authentication=' ➝ 'auth='
+    - 'authentication-key=' ➝ 'auth-key='
     """
+    # Convert authentication parameters for ROS7
+    config_content = re.sub(r'\bauthentication-key\b', 'auth-key', config_content)
+    config_content = re.sub(r'\bauthentication\b', 'auth', config_content)
+
     ospf_config = f"""/routing ospf instance
 add disabled=no name=default-v2 router-id={router_id} version=2 redistribute-connected=yes redistribute-static=yes
 /routing ospf area
@@ -97,7 +105,8 @@ add disabled=no instance=default-v2 name=backbone-v2
 add area=backbone-v2 cost=10 disabled=no interfaces=loop0 networks={loopback_network} passive=yes priority=1
 add area=backbone-v2 cost=10 disabled=no interfaces=lan-bridge networks={lan_network} priority=1
 """
-    return ospf_config
+
+    return ospf_config, config_content
 
 # BGP transformation for 2004
 def transform_bgp_2004(router_id, as_number, peer_ips):
@@ -113,12 +122,13 @@ add name=Peer2 remote.address={peer_ips[1]} remote.as={as_number} connect=yes li
 """
     return bgp_config
 
-# 🎯 **FULL CONFIGURATION MIGRATION - NOW WITH DUPLICATE PREVENTION**
+# 🎯 **FULL CONFIGURATION MIGRATION - NOW FULLY ROS7 COMPATIBLE**
 def parse_and_migrate(config_content, source_model, target_model):
     """
-    Parses and migrates the configuration from source model to target model.
-    Ensures full transformation including interfaces, OSPF, BGP, IP addresses, and firewall rules.
+    Parses and migrates the configuration from source model to target model (CCR2004).
+    Ensures full transformation including interfaces, OSPF, BGP, IP addresses, firewall rules, and routing policies.
     Prevents duplicate entries in key sections.
+    Fully compatible with ROS7.
     """
     router_id = extract_router_id(config_content)
     as_number = extract_as_number(config_content)
@@ -136,19 +146,26 @@ def parse_and_migrate(config_content, source_model, target_model):
     firewall_rules = extract_firewall_rules(config_content)
     firewall_rules = remove_duplicates(firewall_rules)  # ✅ Remove duplicate firewall rules
 
-    # Step 4️⃣: Apply OSPF transformation
+    # Step 4️⃣: Apply OSPF transformation (ROS7 Compatible)
     if target_model == "2004":
         ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
+        ospf_section = update_ospf_authentication(ospf_section)  # ✅ Convert `authentication=` to `auth=`
         ospf_section = remove_duplicates(ospf_section)  # ✅ Remove duplicate OSPF entries
         config_content += f"\n\n{ospf_section}"
 
-    # Step 5️⃣: Apply BGP transformation
+    # Step 5️⃣: Apply BGP transformation (ROS7 Compatible)
     if target_model == "2004":
         bgp_section = transform_bgp_2004(router_id, as_number, peer_ips)
         bgp_section = remove_duplicates(bgp_section)  # ✅ Remove duplicate BGP entries
         config_content += f"\n\n{bgp_section}"
 
-    # Step 6️⃣: Ensure firewall rules are included (without duplicates)
+    # Step 6️⃣: Migrate /ip route section for CCR2004
+    if target_model == "2004":
+        route_section = migrate_ip_routes(config_content, interface_mappings)
+        route_section = remove_duplicates(route_section)  # ✅ Prevent duplicate route entries
+        config_content += f"\n\n{route_section}"
+
+    # Step 7️⃣: Ensure firewall rules are included (without duplicates)
     if firewall_rules:
         config_content += f"\n\n{firewall_rules}"
 
@@ -205,6 +222,34 @@ def extract_firewall_rules(config_content):
             firewall_section.append(line)
 
     return "\n".join(firewall_section) if firewall_section else ""
+
+def migrate_ip_routes(config_content, interface_mappings):
+    """
+    Migrates `/ip route` section by mapping interfaces dynamically for CCR2004.
+    Ensures compatibility with RouterOS 7.
+    """
+    migrated_lines = []
+    in_route_section = False  # Track if we are in the `/ip route` section
+
+    for line in config_content.splitlines():
+        if line.strip().startswith("/ip route"):
+            in_route_section = True
+            migrated_lines.append(line)  # Keep section header
+            continue
+
+        if in_route_section and "gateway=" in line:
+            # Find old interface names and replace them with mapped ones
+            route_match = re.search(r'(gateway=)(ether\d+|sfp\d+)', line)
+            if route_match:
+                prefix, old_iface = route_match.groups()
+                new_iface = interface_mappings.get(old_iface, old_iface)  # Replace if mapped
+                migrated_lines.append(line.replace(old_iface, new_iface))
+            else:
+                migrated_lines.append(line)
+        else:
+            migrated_lines.append(line)
+
+    return "\n".join(migrated_lines)
 
 def remove_duplicates(section):
     """
