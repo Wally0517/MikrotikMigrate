@@ -77,6 +77,33 @@ def dynamic_interface_mapping(config_content, source_model, target_model):
 
     return config_content  # If not migrating to 2004
 
+def migrate_ip_addresses(config_content, interface_mappings):
+    """
+    Migrate /ip address section by mapping old interfaces to new dynamically assigned interfaces.
+    """
+    migrated_lines = []
+    in_ip_section = False
+
+    for line in config_content.splitlines():
+        if line.strip().startswith("/ip address"):
+            in_ip_section = True
+            migrated_lines.append(line)  # Keep section header
+            continue
+
+        if in_ip_section and re.match(r'add address=.*interface=', line):
+            ip_match = re.search(r'(interface=)(ether\d+|sfp\d+)', line)
+            if ip_match:
+                prefix, old_iface = ip_match.groups()
+                new_iface = interface_mappings.get(old_iface, old_iface)  # Replace with mapped iface
+                updated_line = line.replace(old_iface, new_iface)
+                migrated_lines.append(updated_line)
+            else:
+                migrated_lines.append(line)
+        else:
+            migrated_lines.append(line)
+
+    return "\n".join(migrated_lines)
+
 # OSPF transformation for 2004
 def transform_ospf_2004(router_id, lan_network, loopback_network):
     ospf_config = f"""/routing ospf instance
@@ -109,6 +136,7 @@ def parse_and_migrate(config_content, source_model, target_model):
 
     # Apply dynamic interface mapping before processing OSPF and BGP
     config_content = dynamic_interface_mapping(config_content, source_model, target_model)
+    config_content = migrate_ip_addresses(config_content, interface_mappings)
 
     # Transform OSPF for 2004
     if target_model == "2004":
