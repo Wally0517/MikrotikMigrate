@@ -109,6 +109,18 @@ add area=backbone-v2 cost=10 disabled=no interfaces=lan-bridge networks={lan_net
 
     return ospf_config  # ✅ Only return transformed OSPF config
 
+#authentication
+def update_ospf_authentication(config_content):
+    """
+    Converts OSPF authentication parameters for ROS7.
+    - Changes 'authentication=' to 'auth='
+    - Changes 'authentication-key=' to 'auth-key='
+    """
+    config_content = re.sub(r'\bauthentication\b', 'auth', config_content)  # Convert 'authentication='
+    config_content = re.sub(r'\bauthentication-key\b', 'auth-key', config_content)  # Convert 'authentication-key='
+    
+    return config_content
+
 
 # BGP transformation for 2004
 def transform_bgp_2004(router_id, as_number, peer_ips):
@@ -153,10 +165,10 @@ def parse_and_migrate(config_content, source_model, target_model):
 
     # Step 4️⃣: Apply OSPF transformation (ROS7 Compatible)
     if target_model == "2004":
-        ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network, config_content)
-        ospf_section = update_ospf_authentication(ospf_section)  # ✅ Convert `authentication=` to `auth=`
-        ospf_section = remove_duplicates(ospf_section)  # ✅ Remove duplicate OSPF entries
-        config_content += f"\n\n{ospf_section}"
+    ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network, config_content)
+    ospf_section = update_ospf_authentication(ospf_section)  # ✅ Apply OSPF authentication updates
+    ospf_section = remove_duplicates(ospf_section)  # ✅ Prevent duplicate OSPF entries
+    config_content += f"\n\n{ospf_section}"
 
     # Step 5️⃣: Apply BGP transformation (ROS7 Compatible)
     if target_model == "2004":
