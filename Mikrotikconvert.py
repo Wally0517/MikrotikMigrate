@@ -113,11 +113,12 @@ add name=Peer2 remote.address={peer_ips[1]} remote.as={as_number} connect=yes li
 """
     return bgp_config
 
-# 🎯 **FULL CONFIGURATION MIGRATION WITH FIXES**
+# 🎯 **FULL CONFIGURATION MIGRATION - NOW WITH DUPLICATE PREVENTION**
 def parse_and_migrate(config_content, source_model, target_model):
     """
     Parses and migrates the configuration from source model to target model.
     Ensures full transformation including interfaces, OSPF, BGP, IP addresses, and firewall rules.
+    Prevents duplicate entries in key sections.
     """
     router_id = extract_router_id(config_content)
     as_number = extract_as_number(config_content)
@@ -131,24 +132,27 @@ def parse_and_migrate(config_content, source_model, target_model):
     # Step 2️⃣: Migrate IP address section
     config_content = migrate_ip_addresses(config_content, interface_mappings)
 
-    # Step 3️⃣: Extract and retain firewall rules
+    # Step 3️⃣: Extract and retain firewall rules (now ensuring uniqueness)
     firewall_rules = extract_firewall_rules(config_content)
+    firewall_rules = remove_duplicates(firewall_rules)  # ✅ Remove duplicate firewall rules
 
     # Step 4️⃣: Apply OSPF transformation
     if target_model == "2004":
         ospf_section = transform_ospf_2004(router_id, lan_network, loopback_network)
-        config_content += f"\n\n{ospf_section}"  # ✅ Append instead of replacing
+        ospf_section = remove_duplicates(ospf_section)  # ✅ Remove duplicate OSPF entries
+        config_content += f"\n\n{ospf_section}"
 
     # Step 5️⃣: Apply BGP transformation
     if target_model == "2004":
         bgp_section = transform_bgp_2004(router_id, as_number, peer_ips)
-        config_content += f"\n\n{bgp_section}"  # ✅ Append instead of replacing
+        bgp_section = remove_duplicates(bgp_section)  # ✅ Remove duplicate BGP entries
+        config_content += f"\n\n{bgp_section}"
 
-    # Step 6️⃣: Ensure firewall rules are included
+    # Step 6️⃣: Ensure firewall rules are included (without duplicates)
     if firewall_rules:
         config_content += f"\n\n{firewall_rules}"
 
-    return config_content  # ✅ Fully processed with IPs, OSPF, BGP, and firewall settings.
+    return config_content  # ✅ Fully processed with NO DUPLICATES!
 
 # Helper functions
 def extract_router_id(config_content):
@@ -201,6 +205,23 @@ def extract_firewall_rules(config_content):
             firewall_section.append(line)
 
     return "\n".join(firewall_section) if firewall_section else ""
+
+def remove_duplicates(section):
+    """
+    Removes duplicate lines from a section while maintaining order.
+    Ensures unique firewall rules, OSPF, and BGP entries.
+    """
+    seen = set()
+    unique_lines = []
+
+    for line in section.splitlines():
+        stripped_line = line.strip()
+
+        if stripped_line and stripped_line not in seen:
+            seen.add(stripped_line)
+            unique_lines.append(line)  # Preserve original spacing
+
+    return "\n".join(unique_lines)
 
 def extract_peer_ips(config_content):
     """
