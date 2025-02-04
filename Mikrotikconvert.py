@@ -90,12 +90,13 @@ def transform_ospf_2004(router_id, lan_network, loopback_network, config_content
     """
     Transforms OSPF configuration for CCR2004, ensuring compatibility with ROS7.
     Fixes authentication changes:
-    - 'authentication=' ➝ 'auth='
-    - 'authentication-key=' ➝ 'auth-key='
+      - 'authentication=' → 'auth='
+      - 'authentication-key=' → 'auth-key='
     """
+
     # Convert authentication parameters for ROS7
-    config_content = re.sub(r'\bauthentication-key\b', 'auth-key', config_content)
-    config_content = re.sub(r'\bauthentication\b', 'auth', config_content)
+    config_content = re.sub(r'\bauthentication\b', 'auth', config_content)  # First replace 'authentication='
+    config_content = re.sub(r'\bauthentication-key\b', 'auth-key', config_content)  # Then replace 'authentication-key='
 
     ospf_config = f"""/routing ospf instance
 add disabled=no name=default-v2 router-id={router_id} version=2 redistribute-connected=yes redistribute-static=yes
@@ -106,7 +107,8 @@ add area=backbone-v2 cost=10 disabled=no interfaces=loop0 networks={loopback_net
 add area=backbone-v2 cost=10 disabled=no interfaces=lan-bridge networks={lan_network} priority=1
 """
 
-    return ospf_config, config_content
+    return ospf_config  # ✅ Only return transformed OSPF config
+
 
 # BGP transformation for 2004
 def transform_bgp_2004(router_id, as_number, peer_ips):
