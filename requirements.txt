@@ -1,6 +1,4 @@
-flask
+Flask
 gunicorn
-werkzeug
 requests
-os
-logging
+werkzeug
