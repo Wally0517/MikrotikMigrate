@@ -2,6 +2,5 @@ flask
 gunicorn
 werkzeug
 requests
-re
 os
 logging
