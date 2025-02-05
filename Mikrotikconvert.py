@@ -8,8 +8,8 @@ app = Flask(__name__, template_folder="templates")
 
 # Set up paths relative to the MikrotikMigrate folder
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = "/tmp/uploads"
-PROCESSED_FOLDER = "/tmp/processed"
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+PROCESSED_FOLDER = os.path.join(BASE_DIR, "processed")
 TEMPLATES_FOLDER = os.path.join(BASE_DIR, 'MikrotikMigrate', 'templates')
 
 
@@ -314,47 +314,34 @@ logging.basicConfig(level=logging.DEBUG)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return {"error": "No file uploaded"}, 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return {"error": "No selected file"}, 400
-
-    source_model = request.form.get('source_model')
-    target_model = request.form.get('target_model')
-
-    if not source_model or not target_model:
-        return {"error": "Source or target model not specified"}, 400
-
-    # Save uploaded file
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
-
-    # Read and process the configuration file
+    logging.info("Upload process started...")
     try:
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+
+        source_model = request.form.get('source_model')
+        target_model = request.form.get('target_model')
+
+        if not source_model or not target_model:
+            return jsonify({"error": "Source or target model not specified"}), 400
+
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
+
+        logging.info(f"Processing file: {file.filename}")
+
         with open(file_path, 'r') as f:
             config_content = f.read()
 
-        # Debug: Ensure file content is being read
-        print(f"Read config file: {file.filename}, Content Size: {len(config_content)}")
-
-        # Migrate the configuration
         migrated_content = parse_and_migrate(config_content, source_model, target_model)
+        logging.info(f"Migrated content size: {len(migrated_content)}")
 
-        # Debug: Ensure transformation is happening
-        print(f"Migrated content size: {len(migrated_content)}")
-        print("FINAL MIGRATION OUTPUT:\n", migrated_content)  # ✅ Debugging
-
-        # Return source and target model previews as JSON
-        return jsonify({
-            "source_config": config_content,
-            "target_config": migrated_content
-        })
+        return jsonify({"source_config": config_content, "target_config": migrated_content})
 
     except Exception as e:
-        print(f"Error processing file: {str(e)}")
-        return {"error": str(e)}, 500
+        logging.error(f"Error processing file: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
     # Save the migrated configuration
     processed_file_path = os.path.join(app.config['PROCESSED_FOLDER'], f"migrated_{file.filename}")
@@ -364,4 +351,5 @@ def upload_file():
     return send_file(processed_file_path, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
